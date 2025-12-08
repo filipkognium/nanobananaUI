@@ -221,11 +221,16 @@ def generate_image(client, prompt, uploaded_images=None):
         st.error(f"Error: {str(e)}")
         return None
 
+# Initialize session state for comparison history
+if "comparison_history" not in st.session_state:
+    st.session_state.comparison_history = []
+
 # Main tabs
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🎨 Text to Image",
     "✏️ Image Editing",
     "🔀 Multi-Image Composition",
+    "⚖️ A/B Compare",
     "📖 Documentation"
 ])
 
@@ -450,8 +455,140 @@ with tab3:
                         )
                         display_cost_breakdown(cost, model_choice)
 
-# Tab 4: Documentation
+# Tab 4: A/B Comparison
 with tab4:
+    st.header("⚖️ A/B Prompt Comparison")
+    st.markdown("Upload an image and test two different prompts side by side to compare results.")
+
+    compare_image = st.file_uploader("Upload image to compare", type=["png", "jpg", "jpeg", "webp"], key="compare_upload")
+
+    if compare_image:
+        source_img = Image.open(compare_image)
+        st.image(source_img, caption="Source Image", width=400)
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("### Prompt A")
+            prompt_a = st.text_area("Enter Prompt A", placeholder="Make it look like a watercolor painting", height=100, key="prompt_a")
+
+        with col2:
+            st.markdown("### Prompt B")
+            prompt_b = st.text_area("Enter Prompt B", placeholder="Make it look like an oil painting", height=100, key="prompt_b")
+
+        if st.button("🚀 Run Comparison", type="primary", key="run_compare"):
+            if not api_key:
+                st.error("Please enter your API key in the sidebar")
+            elif not prompt_a or not prompt_b:
+                st.warning("Please enter both prompts")
+            else:
+                client = get_client()
+
+                # Prepare image
+                compare_image.seek(0)
+                img_bytes = compare_image.read()
+                img_base64 = base64.b64encode(img_bytes).decode('utf-8')
+                mime_type = f"image/{compare_image.type.split('/')[-1]}" if '/' in compare_image.type else "image/png"
+                uploaded_img = types.Part.from_bytes(data=img_bytes, mime_type=mime_type)
+
+                result_a = None
+                result_b = None
+                cost_a = None
+                cost_b = None
+
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.markdown("### Result A")
+                    with st.spinner("Generating with Prompt A..."):
+                        response_a = generate_image(client, prompt_a, [uploaded_img])
+                        if response_a and response_a.candidates:
+                            for part in response_a.candidates[0].content.parts:
+                                if hasattr(part, 'text') and part.text:
+                                    st.write(part.text)
+                                elif hasattr(part, 'inline_data') and part.inline_data:
+                                    raw_data = part.inline_data.data
+                                    if isinstance(raw_data, str):
+                                        image_data = base64.b64decode(raw_data)
+                                    else:
+                                        image_data = raw_data
+                                    result_a = Image.open(io.BytesIO(image_data))
+                                    st.image(result_a, caption="Result A")
+                            if hasattr(response_a, 'usage_metadata') and response_a.usage_metadata:
+                                cost_a = calculate_cost_from_usage(model_choice, response_a.usage_metadata, 1)
+                                st.caption(f"Cost: ${cost_a['total_cost']:.4f}")
+
+                with col2:
+                    st.markdown("### Result B")
+                    with st.spinner("Generating with Prompt B..."):
+                        response_b = generate_image(client, prompt_b, [uploaded_img])
+                        if response_b and response_b.candidates:
+                            for part in response_b.candidates[0].content.parts:
+                                if hasattr(part, 'text') and part.text:
+                                    st.write(part.text)
+                                elif hasattr(part, 'inline_data') and part.inline_data:
+                                    raw_data = part.inline_data.data
+                                    if isinstance(raw_data, str):
+                                        image_data = base64.b64decode(raw_data)
+                                    else:
+                                        image_data = raw_data
+                                    result_b = Image.open(io.BytesIO(image_data))
+                                    st.image(result_b, caption="Result B")
+                            if hasattr(response_b, 'usage_metadata') and response_b.usage_metadata:
+                                cost_b = calculate_cost_from_usage(model_choice, response_b.usage_metadata, 1)
+                                st.caption(f"Cost: ${cost_b['total_cost']:.4f}")
+
+                # Save to history
+                if result_a or result_b:
+                    import datetime
+                    comparison_entry = {
+                        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "prompt_a": prompt_a,
+                        "prompt_b": prompt_b,
+                        "result_a": result_a,
+                        "result_b": result_b,
+                        "cost_a": cost_a,
+                        "cost_b": cost_b,
+                        "model": model_choice
+                    }
+                    st.session_state.comparison_history.insert(0, comparison_entry)
+                    st.success("✅ Comparison saved to history!")
+
+    # Display history
+    if st.session_state.comparison_history:
+        st.divider()
+        st.markdown("## 📜 Comparison History")
+
+        for i, entry in enumerate(st.session_state.comparison_history):
+            with st.expander(f"🕐 {entry['timestamp']} - {entry['model']}", expanded=(i == 0)):
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.markdown(f"**Prompt A:** {entry['prompt_a']}")
+                    if entry['result_a']:
+                        st.image(entry['result_a'], caption="Result A", use_container_width=True)
+                        buf = io.BytesIO()
+                        entry['result_a'].save(buf, format="PNG")
+                        st.download_button(f"📥 Download A", buf.getvalue(), f"compare_a_{i}.png", "image/png", key=f"dl_a_{i}")
+                    if entry['cost_a']:
+                        st.caption(f"Cost: ${entry['cost_a']['total_cost']:.4f}")
+
+                with col2:
+                    st.markdown(f"**Prompt B:** {entry['prompt_b']}")
+                    if entry['result_b']:
+                        st.image(entry['result_b'], caption="Result B", use_container_width=True)
+                        buf = io.BytesIO()
+                        entry['result_b'].save(buf, format="PNG")
+                        st.download_button(f"📥 Download B", buf.getvalue(), f"compare_b_{i}.png", "image/png", key=f"dl_b_{i}")
+                    if entry['cost_b']:
+                        st.caption(f"Cost: ${entry['cost_b']['total_cost']:.4f}")
+
+        if st.button("🗑️ Clear History"):
+            st.session_state.comparison_history = []
+            st.rerun()
+
+# Tab 5: Documentation
+with tab5:
     st.header("📖 Nano Banana Pro API Documentation")
 
     st.markdown("""
