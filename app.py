@@ -581,9 +581,19 @@ with tab4:
             st.markdown("### Prompt C (Flux Kontext Pro)")
             prompt_c = st.text_area("Enter Prompt C", placeholder="Transform into a pencil sketch", height=100, key="prompt_c")
 
+        # Generations per image setting
+        st.markdown("---")
+        num_generations = st.number_input(
+            "🔢 Generations per reference image (per prompt)",
+            min_value=1,
+            max_value=10,
+            value=1,
+            help="Each reference image will be generated this many times for each of the 3 prompts"
+        )
+
         # Estimate
-        total_generations = len(compare_images) * 3
-        st.info(f"📊 This will generate **{total_generations} images** ({len(compare_images)} images × 3 models)")
+        total_generations = len(compare_images) * 3 * num_generations
+        st.info(f"📊 This will generate **{total_generations} images** ({len(compare_images)} images × 3 prompts × {num_generations} generations each)")
 
         if st.button("🚀 Run Bulk Comparison", type="primary", key="run_compare"):
             missing_keys = []
@@ -606,6 +616,9 @@ with tab4:
                 all_results = []
                 total_cost = {"gemini_pro": 0, "gemini_flash": 0, "flux": 0}
 
+                total_steps = len(compare_images) * num_generations * 3
+                current_step = 0
+
                 for img_idx, img_file in enumerate(compare_images):
                     # Prepare image
                     img_file.seek(0)
@@ -617,73 +630,77 @@ with tab4:
                     result_row = {
                         "source": source_img,
                         "source_name": img_file.name,
-                        "result_a": None,
-                        "result_b": None,
-                        "result_c": None,
-                        "cost_a": None,
-                        "cost_b": None,
+                        "results_a": [],  # List of generations for prompt A
+                        "results_b": [],  # List of generations for prompt B
+                        "results_c": [],  # List of generations for prompt C
+                        "costs_a": [],
+                        "costs_b": [],
+                        "costs_c": [],
                     }
 
-                    base_progress = img_idx / len(compare_images)
+                    # Generate multiple times with Prompt A (Nano Banana Pro)
+                    for gen_idx in range(num_generations):
+                        current_step += 1
+                        status_text.text(f"Image {img_idx+1}/{len(compare_images)}, Prompt A, Gen {gen_idx+1}/{num_generations}")
+                        progress_bar.progress(current_step / total_steps)
 
-                    # Generate with Gemini Pro
-                    status_text.text(f"Image {img_idx+1}/{len(compare_images)}: Generating with Gemini Pro...")
-                    progress_bar.progress(base_progress + 0.1 / len(compare_images))
+                        response_a = generate_image_with_model(client, prompt_a, [uploaded_img], "gemini-3-pro-image-preview")
+                        if response_a and response_a.candidates:
+                            for part in response_a.candidates[0].content.parts:
+                                if hasattr(part, 'inline_data') and part.inline_data:
+                                    raw_data = part.inline_data.data
+                                    if isinstance(raw_data, str):
+                                        image_data = base64.b64decode(raw_data)
+                                    else:
+                                        image_data = raw_data
+                                    result_row["results_a"].append(Image.open(io.BytesIO(image_data)))
+                            if hasattr(response_a, 'usage_metadata') and response_a.usage_metadata:
+                                cost = calculate_cost_from_usage("gemini-3-pro-image-preview", response_a.usage_metadata, 1)
+                                result_row["costs_a"].append(cost)
+                                total_cost["gemini_pro"] += cost['total_cost']
 
-                    response_a = generate_image_with_model(client, prompt_a, [uploaded_img], "gemini-3-pro-image-preview")
-                    if response_a and response_a.candidates:
-                        for part in response_a.candidates[0].content.parts:
-                            if hasattr(part, 'inline_data') and part.inline_data:
-                                raw_data = part.inline_data.data
-                                if isinstance(raw_data, str):
-                                    image_data = base64.b64decode(raw_data)
-                                else:
-                                    image_data = raw_data
-                                result_row["result_a"] = Image.open(io.BytesIO(image_data))
-                        if hasattr(response_a, 'usage_metadata') and response_a.usage_metadata:
-                            cost = calculate_cost_from_usage("gemini-3-pro-image-preview", response_a.usage_metadata, 1)
-                            result_row["cost_a"] = cost
-                            total_cost["gemini_pro"] += cost['total_cost']
+                    # Generate multiple times with Prompt B (Nano Banana Pro)
+                    for gen_idx in range(num_generations):
+                        current_step += 1
+                        status_text.text(f"Image {img_idx+1}/{len(compare_images)}, Prompt B, Gen {gen_idx+1}/{num_generations}")
+                        progress_bar.progress(current_step / total_steps)
 
-                    # Generate with Nano Banana Pro (Prompt B)
-                    status_text.text(f"Image {img_idx+1}/{len(compare_images)}: Generating with Nano Banana Pro (Prompt B)...")
-                    progress_bar.progress(base_progress + 0.2 / len(compare_images))
+                        response_b = generate_image_with_model(client, prompt_b, [uploaded_img], "gemini-3-pro-image-preview")
+                        if response_b and response_b.candidates:
+                            for part in response_b.candidates[0].content.parts:
+                                if hasattr(part, 'inline_data') and part.inline_data:
+                                    raw_data = part.inline_data.data
+                                    if isinstance(raw_data, str):
+                                        image_data = base64.b64decode(raw_data)
+                                    else:
+                                        image_data = raw_data
+                                    result_row["results_b"].append(Image.open(io.BytesIO(image_data)))
+                            if hasattr(response_b, 'usage_metadata') and response_b.usage_metadata:
+                                cost = calculate_cost_from_usage("gemini-3-pro-image-preview", response_b.usage_metadata, 1)
+                                result_row["costs_b"].append(cost)
+                                total_cost["gemini_pro"] += cost['total_cost']
 
-                    response_b = generate_image_with_model(client, prompt_b, [uploaded_img], "gemini-3-pro-image-preview")
-                    if response_b and response_b.candidates:
-                        for part in response_b.candidates[0].content.parts:
-                            if hasattr(part, 'inline_data') and part.inline_data:
-                                raw_data = part.inline_data.data
-                                if isinstance(raw_data, str):
-                                    image_data = base64.b64decode(raw_data)
-                                else:
-                                    image_data = raw_data
-                                result_row["result_b"] = Image.open(io.BytesIO(image_data))
-                        if hasattr(response_b, 'usage_metadata') and response_b.usage_metadata:
-                            cost = calculate_cost_from_usage("gemini-3-pro-image-preview", response_b.usage_metadata, 1)
-                            result_row["cost_b"] = cost
-                            total_cost["gemini_pro"] += cost['total_cost']
+                    # Generate multiple times with Prompt C (Flux Kontext Pro)
+                    for gen_idx in range(num_generations):
+                        current_step += 1
+                        status_text.text(f"Image {img_idx+1}/{len(compare_images)}, Prompt C (Flux), Gen {gen_idx+1}/{num_generations}")
+                        progress_bar.progress(current_step / total_steps)
 
-                    # Generate with Flux Kontext Pro
-                    status_text.text(f"Image {img_idx+1}/{len(compare_images)}: Generating with Flux Kontext Pro...")
-                    progress_bar.progress(base_progress + 0.3 / len(compare_images))
-
-                    output_c, flux_cost = generate_flux_kontext(prompt_c, img_bytes, aspect_ratio)
-                    if output_c:
-                        if hasattr(output_c, 'read'):
-                            result_row["result_c"] = Image.open(output_c)
-                        elif isinstance(output_c, str):
-                            resp = requests.get(output_c)
-                            result_row["result_c"] = Image.open(io.BytesIO(resp.content))
-                        else:
-                            img_url = output_c[0] if isinstance(output_c, list) else str(output_c)
-                            resp = requests.get(img_url)
-                            result_row["result_c"] = Image.open(io.BytesIO(resp.content))
-                        result_row["cost_c"] = flux_cost
-                        total_cost["flux"] += flux_cost
+                        output_c, flux_cost = generate_flux_kontext(prompt_c, img_bytes, aspect_ratio)
+                        if output_c:
+                            if hasattr(output_c, 'read'):
+                                result_row["results_c"].append(Image.open(output_c))
+                            elif isinstance(output_c, str):
+                                resp = requests.get(output_c)
+                                result_row["results_c"].append(Image.open(io.BytesIO(resp.content)))
+                            else:
+                                img_url = output_c[0] if isinstance(output_c, list) else str(output_c)
+                                resp = requests.get(img_url)
+                                result_row["results_c"].append(Image.open(io.BytesIO(resp.content)))
+                            result_row["costs_c"].append(flux_cost)
+                            total_cost["flux"] += flux_cost
 
                     all_results.append(result_row)
-                    progress_bar.progress((img_idx + 1) / len(compare_images))
 
                 status_text.text("✅ All generations complete!")
                 progress_bar.progress(1.0)
@@ -692,56 +709,62 @@ with tab4:
                 st.divider()
                 st.markdown("## 📊 Results")
 
-                # Header row
-                header_cols = st.columns([1, 1, 1, 1])
-                with header_cols[0]:
-                    st.markdown("**Source**")
-                with header_cols[1]:
-                    st.markdown(f"**Nano Banana Pro (A)**\n\n_{prompt_a[:50]}..._" if len(prompt_a) > 50 else f"**Nano Banana Pro (A)**\n\n_{prompt_a}_")
-                with header_cols[2]:
-                    st.markdown(f"**Nano Banana Pro (B)**\n\n_{prompt_b[:50]}..._" if len(prompt_b) > 50 else f"**Nano Banana Pro (B)**\n\n_{prompt_b}_")
-                with header_cols[3]:
-                    st.markdown(f"**Flux Kontext Pro**\n\n_{prompt_c[:50]}..._" if len(prompt_c) > 50 else f"**Flux Kontext Pro**\n\n_{prompt_c}_")
-
-                # Result rows
                 for row_idx, row in enumerate(all_results):
-                    cols = st.columns([1, 1, 1, 1])
+                    st.markdown(f"### 📷 {row['source_name']}")
 
-                    with cols[0]:
-                        st.image(row["source"], caption=row["source_name"], width="stretch")
+                    # Source image
+                    src_col, _ = st.columns([1, 3])
+                    with src_col:
+                        st.image(row["source"], caption="Reference", width="stretch")
 
-                    with cols[1]:
-                        if row["result_a"]:
-                            st.image(row["result_a"], width="stretch")
-                            if row["cost_a"]:
-                                st.caption(f"${row['cost_a']['total_cost']:.4f}")
-                            buf = io.BytesIO()
-                            row["result_a"].save(buf, format="PNG")
-                            st.download_button("📥", buf.getvalue(), f"gemini_pro_{row_idx}.png", "image/png", key=f"dl_a_{row_idx}")
-                        else:
-                            st.warning("Failed")
+                    # Prompt A results
+                    st.markdown(f"**Prompt A (Nano Banana Pro):** _{prompt_a}_")
+                    if row["results_a"]:
+                        cols_a = st.columns(len(row["results_a"]))
+                        for gen_idx, img in enumerate(row["results_a"]):
+                            with cols_a[gen_idx]:
+                                st.image(img, width="stretch")
+                                cost = row["costs_a"][gen_idx] if gen_idx < len(row["costs_a"]) else None
+                                if cost:
+                                    st.caption(f"${cost['total_cost']:.4f}")
+                                buf = io.BytesIO()
+                                img.save(buf, format="PNG")
+                                st.download_button("📥", buf.getvalue(), f"a_{row_idx}_{gen_idx}.png", "image/png", key=f"dl_a_{row_idx}_{gen_idx}")
+                    else:
+                        st.warning("No generations for Prompt A")
 
-                    with cols[2]:
-                        if row["result_b"]:
-                            st.image(row["result_b"], width="stretch")
-                            if row["cost_b"]:
-                                st.caption(f"${row['cost_b']['total_cost']:.4f}")
-                            buf = io.BytesIO()
-                            row["result_b"].save(buf, format="PNG")
-                            st.download_button("📥", buf.getvalue(), f"nano_banana_pro_b_{row_idx}.png", "image/png", key=f"dl_b_{row_idx}")
-                        else:
-                            st.warning("Failed")
+                    # Prompt B results
+                    st.markdown(f"**Prompt B (Nano Banana Pro):** _{prompt_b}_")
+                    if row["results_b"]:
+                        cols_b = st.columns(len(row["results_b"]))
+                        for gen_idx, img in enumerate(row["results_b"]):
+                            with cols_b[gen_idx]:
+                                st.image(img, width="stretch")
+                                cost = row["costs_b"][gen_idx] if gen_idx < len(row["costs_b"]) else None
+                                if cost:
+                                    st.caption(f"${cost['total_cost']:.4f}")
+                                buf = io.BytesIO()
+                                img.save(buf, format="PNG")
+                                st.download_button("📥", buf.getvalue(), f"b_{row_idx}_{gen_idx}.png", "image/png", key=f"dl_b_{row_idx}_{gen_idx}")
+                    else:
+                        st.warning("No generations for Prompt B")
 
-                    with cols[3]:
-                        if row["result_c"]:
-                            st.image(row["result_c"], width="stretch")
-                            flux_cost = row.get("cost_c", 0)
-                            st.caption(f"${flux_cost:.4f}")
-                            buf = io.BytesIO()
-                            row["result_c"].save(buf, format="PNG")
-                            st.download_button("📥", buf.getvalue(), f"flux_{row_idx}.png", "image/png", key=f"dl_c_{row_idx}")
-                        else:
-                            st.warning("Failed")
+                    # Prompt C results
+                    st.markdown(f"**Prompt C (Flux Kontext Pro):** _{prompt_c}_")
+                    if row["results_c"]:
+                        cols_c = st.columns(len(row["results_c"]))
+                        for gen_idx, img in enumerate(row["results_c"]):
+                            with cols_c[gen_idx]:
+                                st.image(img, width="stretch")
+                                cost = row["costs_c"][gen_idx] if gen_idx < len(row["costs_c"]) else 0
+                                st.caption(f"${cost:.4f}")
+                                buf = io.BytesIO()
+                                img.save(buf, format="PNG")
+                                st.download_button("📥", buf.getvalue(), f"c_{row_idx}_{gen_idx}.png", "image/png", key=f"dl_c_{row_idx}_{gen_idx}")
+                    else:
+                        st.warning("No generations for Prompt C")
+
+                    st.divider()
 
                 # Total cost summary
                 st.divider()
@@ -806,8 +829,10 @@ with tab4:
 
     <div class="summary">
         <h2>📊 Summary</h2>
-        <p><strong>Total Images:</strong> {len(all_results)}</p>
-        <p><strong>Models Used:</strong> Nano Banana Pro (×2), Flux Kontext Pro</p>
+        <p><strong>Reference Images:</strong> {len(all_results)}</p>
+        <p><strong>Generations per Image:</strong> {num_generations} per prompt</p>
+        <p><strong>Total Generations:</strong> {len(all_results) * num_generations * 3}</p>
+        <p><strong>Models Used:</strong> Nano Banana Pro (Prompts A & B), Flux Kontext Pro (Prompt C)</p>
         <div class="cost">
             <table class="cost-table">
                 <tr><th>Model</th><th>Prompt</th><th>Cost</th></tr>
@@ -823,13 +848,6 @@ with tab4:
 
                 for idx, row in enumerate(all_results):
                     source_b64 = pil_to_base64_html(row.get("source"))
-                    result_a_b64 = pil_to_base64_html(row.get("result_a"))
-                    result_b_b64 = pil_to_base64_html(row.get("result_b"))
-                    result_c_b64 = pil_to_base64_html(row.get("result_c"))
-
-                    cost_a = row.get("cost_a", {}).get("total_cost", 0) if row.get("cost_a") else 0
-                    cost_b = row.get("cost_b", {}).get("total_cost", 0) if row.get("cost_b") else 0
-                    cost_c = row.get("cost_c", 0)
 
                     html_report += f"""
     <div class="image-section">
@@ -840,30 +858,64 @@ with tab4:
             <img src="data:image/png;base64,{source_b64}" alt="Reference">
         </div>
 
+        <h3>Prompt A (Nano Banana Pro): "{prompt_a}"</h3>
         <div class="edits">
+"""
+                    # Add all Prompt A generations
+                    for gen_idx, img in enumerate(row.get("results_a", [])):
+                        img_b64 = pil_to_base64_html(img)
+                        cost = row["costs_a"][gen_idx]["total_cost"] if gen_idx < len(row.get("costs_a", [])) else 0
+                        html_report += f"""
             <div class="edit">
-                <h3>Edit 1</h3>
-                <div class="model">Nano Banana Pro</div>
-                <div class="prompt">"{prompt_a}"</div>
-                {'<img src="data:image/png;base64,' + result_a_b64 + '" alt="Nano Banana Pro Result A">' if result_a_b64 else '<p style="color: red;">Generation failed</p>'}
-                <p style="font-size: 11px; color: #666;">Cost: ${cost_a:.4f}</p>
+                <h3>Gen {gen_idx + 1}</h3>
+                <img src="data:image/png;base64,{img_b64}" alt="Prompt A Gen {gen_idx + 1}">
+                <p style="font-size: 11px; color: #666;">Cost: ${cost:.4f}</p>
             </div>
+"""
+                    if not row.get("results_a"):
+                        html_report += '<p style="color: red;">No generations</p>'
 
-            <div class="edit">
-                <h3>Edit 2</h3>
-                <div class="model">Nano Banana Pro</div>
-                <div class="prompt">"{prompt_b}"</div>
-                {'<img src="data:image/png;base64,' + result_b_b64 + '" alt="Nano Banana Pro Result B">' if result_b_b64 else '<p style="color: red;">Generation failed</p>'}
-                <p style="font-size: 11px; color: #666;">Cost: ${cost_b:.4f}</p>
-            </div>
+                    html_report += f"""
+        </div>
 
+        <h3>Prompt B (Nano Banana Pro): "{prompt_b}"</h3>
+        <div class="edits">
+"""
+                    # Add all Prompt B generations
+                    for gen_idx, img in enumerate(row.get("results_b", [])):
+                        img_b64 = pil_to_base64_html(img)
+                        cost = row["costs_b"][gen_idx]["total_cost"] if gen_idx < len(row.get("costs_b", [])) else 0
+                        html_report += f"""
             <div class="edit">
-                <h3>Edit 3</h3>
-                <div class="model">Flux Kontext Pro</div>
-                <div class="prompt">"{prompt_c}"</div>
-                {'<img src="data:image/png;base64,' + result_c_b64 + '" alt="Flux Kontext Pro Result">' if result_c_b64 else '<p style="color: red;">Generation failed</p>'}
-                <p style="font-size: 11px; color: #666;">Cost: ${cost_c:.4f}</p>
+                <h3>Gen {gen_idx + 1}</h3>
+                <img src="data:image/png;base64,{img_b64}" alt="Prompt B Gen {gen_idx + 1}">
+                <p style="font-size: 11px; color: #666;">Cost: ${cost:.4f}</p>
             </div>
+"""
+                    if not row.get("results_b"):
+                        html_report += '<p style="color: red;">No generations</p>'
+
+                    html_report += f"""
+        </div>
+
+        <h3>Prompt C (Flux Kontext Pro): "{prompt_c}"</h3>
+        <div class="edits">
+"""
+                    # Add all Prompt C generations
+                    for gen_idx, img in enumerate(row.get("results_c", [])):
+                        img_b64 = pil_to_base64_html(img)
+                        cost = row["costs_c"][gen_idx] if gen_idx < len(row.get("costs_c", [])) else 0
+                        html_report += f"""
+            <div class="edit">
+                <h3>Gen {gen_idx + 1}</h3>
+                <img src="data:image/png;base64,{img_b64}" alt="Prompt C Gen {gen_idx + 1}">
+                <p style="font-size: 11px; color: #666;">Cost: ${cost:.4f}</p>
+            </div>
+"""
+                    if not row.get("results_c"):
+                        html_report += '<p style="color: red;">No generations</p>'
+
+                    html_report += """
         </div>
     </div>
 """
@@ -891,6 +943,7 @@ with tab4:
                     "results": all_results,
                     "total_cost": total_cost,
                     "num_images": len(compare_images),
+                    "num_generations": num_generations,
                     "model": "Bulk Triple Comparison"
                 }
                 st.session_state.comparison_history.insert(0, comparison_entry)
@@ -905,27 +958,42 @@ with tab4:
             is_bulk = 'results' in entry
             label = f"🕐 {entry['timestamp']} - {entry.get('model', 'Unknown')}"
             if is_bulk:
-                label += f" ({entry.get('num_images', '?')} images)"
+                num_gens = entry.get('num_generations', 1)
+                label += f" ({entry.get('num_images', '?')} images × {num_gens} gens)"
 
             with st.expander(label, expanded=(i == 0)):
                 if is_bulk:
                     # Bulk comparison display
+                    num_gens = entry.get('num_generations', 1)
+                    st.markdown(f"**Generations per image:** {num_gens}")
                     st.markdown(f"**Prompts:** A: {entry['prompt_a'][:50]}... | B: {entry['prompt_b'][:50]}... | C: {entry['prompt_c'][:50]}...")
 
                     for row_idx, row in enumerate(entry.get('results', [])):
-                        cols = st.columns([1, 1, 1, 1])
-                        with cols[0]:
+                        st.markdown(f"**{row.get('source_name', f'Image {row_idx+1}')}**")
+                        src_col, _ = st.columns([1, 3])
+                        with src_col:
                             if row.get("source"):
-                                st.image(row["source"], caption=row.get("source_name", f"Image {row_idx+1}"), width="stretch")
-                        with cols[1]:
-                            if row.get("result_a"):
-                                st.image(row["result_a"], width="stretch")
-                        with cols[2]:
-                            if row.get("result_b"):
-                                st.image(row["result_b"], width="stretch")
-                        with cols[3]:
-                            if row.get("result_c"):
-                                st.image(row["result_c"], width="stretch")
+                                st.image(row["source"], caption="Reference", width="stretch")
+
+                        # Show all generations for each prompt
+                        if row.get("results_a"):
+                            st.caption("Prompt A:")
+                            cols_a = st.columns(len(row["results_a"]))
+                            for gen_idx, img in enumerate(row["results_a"]):
+                                with cols_a[gen_idx]:
+                                    st.image(img, width="stretch")
+                        if row.get("results_b"):
+                            st.caption("Prompt B:")
+                            cols_b = st.columns(len(row["results_b"]))
+                            for gen_idx, img in enumerate(row["results_b"]):
+                                with cols_b[gen_idx]:
+                                    st.image(img, width="stretch")
+                        if row.get("results_c"):
+                            st.caption("Prompt C:")
+                            cols_c = st.columns(len(row["results_c"]))
+                            for gen_idx, img in enumerate(row["results_c"]):
+                                with cols_c[gen_idx]:
+                                    st.image(img, width="stretch")
 
                     tc = entry.get('total_cost', {})
                     st.caption(f"Total: ${tc.get('gemini_pro', 0) + tc.get('gemini_flash', 0) + tc.get('flux', 0):.4f}")
