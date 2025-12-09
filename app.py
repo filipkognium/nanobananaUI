@@ -221,7 +221,38 @@ def generate_flux_kontext(prompt, image_bytes, aspect_ratio="match_input_image")
         st.error(f"Flux Kontext Pro Error: {str(e)}")
         return None, 0.0
 
-def generate_image(client, prompt, uploaded_images=None):
+def generate_with_retry(client, model, contents, config, max_retries=50, status_placeholder=None):
+    """Generate content with exponential backoff retry for 503 errors."""
+    import time
+    import random
+
+    base_delay = 2  # Start with 2 seconds
+    max_delay = 60  # Cap at 60 seconds
+
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config
+            )
+            return response
+        except Exception as e:
+            error_str = str(e)
+            # Check if it's a 503 overload error
+            if "503" in error_str or "UNAVAILABLE" in error_str or "overloaded" in error_str.lower():
+                # Exponential backoff with jitter
+                delay = min(base_delay * (2 ** attempt) + random.uniform(0, 1), max_delay)
+                if status_placeholder:
+                    status_placeholder.warning(f"⏳ Model overloaded. Retry {attempt + 1}/{max_retries} in {delay:.1f}s...")
+                time.sleep(delay)
+            else:
+                # Non-retryable error, raise immediately
+                raise e
+
+    raise Exception(f"Failed after {max_retries} retries - model still overloaded")
+
+def generate_image(client, prompt, uploaded_images=None, status_placeholder=None):
     """Generate or edit images using Nano Banana Pro"""
     try:
         # Build contents
@@ -247,20 +278,16 @@ def generate_image(client, prompt, uploaded_images=None):
             image_config=types.ImageConfig(**image_config_dict)
         )
 
-        # Generate
-        response = client.models.generate_content(
-            model=model_choice,
-            contents=contents,
-            config=config
-        )
+        # Generate with retry
+        response = generate_with_retry(client, model_choice, contents, config, status_placeholder=status_placeholder)
 
         return response
     except Exception as e:
         st.error(f"Error: {str(e)}")
         return None
 
-def generate_image_with_model(client, prompt, uploaded_images, target_model):
-    """Generate or edit images using a specific model"""
+def generate_image_with_model(client, prompt, uploaded_images, target_model, status_placeholder=None):
+    """Generate or edit images using a specific model with retry logic"""
     try:
         # Build contents
         contents = []
@@ -285,12 +312,8 @@ def generate_image_with_model(client, prompt, uploaded_images, target_model):
             image_config=types.ImageConfig(**image_config_dict)
         )
 
-        # Generate with specified model
-        response = client.models.generate_content(
-            model=target_model,
-            contents=contents,
-            config=config
-        )
+        # Generate with retry
+        response = generate_with_retry(client, target_model, contents, config, status_placeholder=status_placeholder)
 
         return response
     except Exception as e:
@@ -628,13 +651,17 @@ with tab4:
                         "costs_c": [],
                     }
 
+                    # Create a placeholder for retry status messages
+                    retry_status = st.empty()
+
                     # Generate multiple times with Prompt A (Nano Banana Pro)
                     for gen_idx in range(num_generations):
                         current_step += 1
                         status_text.text(f"Image {img_idx+1}/{len(compare_images)}, Prompt A, Gen {gen_idx+1}/{num_generations}")
                         progress_bar.progress(current_step / total_steps)
+                        retry_status.empty()
 
-                        response_a = generate_image_with_model(client, prompt_a, [uploaded_img], "gemini-3-pro-image-preview")
+                        response_a = generate_image_with_model(client, prompt_a, [uploaded_img], "gemini-3-pro-image-preview", status_placeholder=retry_status)
                         if response_a and response_a.candidates:
                             for part in response_a.candidates[0].content.parts:
                                 if hasattr(part, 'inline_data') and part.inline_data:
@@ -654,8 +681,9 @@ with tab4:
                         current_step += 1
                         status_text.text(f"Image {img_idx+1}/{len(compare_images)}, Prompt B, Gen {gen_idx+1}/{num_generations}")
                         progress_bar.progress(current_step / total_steps)
+                        retry_status.empty()
 
-                        response_b = generate_image_with_model(client, prompt_b, [uploaded_img], "gemini-3-pro-image-preview")
+                        response_b = generate_image_with_model(client, prompt_b, [uploaded_img], "gemini-3-pro-image-preview", status_placeholder=retry_status)
                         if response_b and response_b.candidates:
                             for part in response_b.candidates[0].content.parts:
                                 if hasattr(part, 'inline_data') and part.inline_data:
@@ -675,6 +703,7 @@ with tab4:
                         current_step += 1
                         status_text.text(f"Image {img_idx+1}/{len(compare_images)}, Prompt C (Flux), Gen {gen_idx+1}/{num_generations}")
                         progress_bar.progress(current_step / total_steps)
+                        retry_status.empty()
 
                         output_c, flux_cost = generate_flux_kontext(prompt_c, img_bytes, aspect_ratio)
                         if output_c:
@@ -691,6 +720,7 @@ with tab4:
                             total_cost["flux"] += flux_cost
 
                     all_results.append(result_row)
+                    retry_status.empty()
 
                 status_text.text("✅ All generations complete!")
                 progress_bar.progress(1.0)
