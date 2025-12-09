@@ -399,7 +399,7 @@ with tab2:
         with col1:
             st.markdown("**Original Image:**")
             original_image = Image.open(uploaded_file)
-            st.image(original_image, use_container_width=True)
+            st.image(original_image, width="stretch")
 
     edit_prompt = st.text_area(
         "Describe your edits",
@@ -439,7 +439,7 @@ with tab2:
 
                             with col2:
                                 st.markdown("**Edited Image:**")
-                                st.image(edited_image, use_container_width=True)
+                                st.image(edited_image, width="stretch")
 
                             buf = io.BytesIO()
                             edited_image.save(buf, format="PNG")
@@ -483,7 +483,7 @@ with tab3:
             )
             if img_file:
                 img = Image.open(img_file)
-                st.image(img, use_container_width=True)
+                st.image(img, width="stretch")
                 uploaded_images.append(img)
 
     multi_prompt = st.text_area(
@@ -562,7 +562,7 @@ with tab4:
         for idx, img_file in enumerate(compare_images):
             with thumb_cols[idx % 6]:
                 img = Image.open(img_file)
-                st.image(img, caption=f"Image {idx+1}", use_container_width=True)
+                st.image(img, caption=f"Image {idx+1}", width="stretch")
 
         st.divider()
 
@@ -708,11 +708,11 @@ with tab4:
                     cols = st.columns([1, 1, 1, 1])
 
                     with cols[0]:
-                        st.image(row["source"], caption=row["source_name"], use_container_width=True)
+                        st.image(row["source"], caption=row["source_name"], width="stretch")
 
                     with cols[1]:
                         if row["result_a"]:
-                            st.image(row["result_a"], use_container_width=True)
+                            st.image(row["result_a"], width="stretch")
                             if row["cost_a"]:
                                 st.caption(f"${row['cost_a']['total_cost']:.4f}")
                             buf = io.BytesIO()
@@ -723,7 +723,7 @@ with tab4:
 
                     with cols[2]:
                         if row["result_b"]:
-                            st.image(row["result_b"], use_container_width=True)
+                            st.image(row["result_b"], width="stretch")
                             if row["cost_b"]:
                                 st.caption(f"${row['cost_b']['total_cost']:.4f}")
                             buf = io.BytesIO()
@@ -734,7 +734,7 @@ with tab4:
 
                     with cols[3]:
                         if row["result_c"]:
-                            st.image(row["result_c"], use_container_width=True)
+                            st.image(row["result_c"], width="stretch")
                             flux_cost = row.get("cost_c", 0)
                             st.caption(f"${flux_cost:.4f}")
                             buf = io.BytesIO()
@@ -916,16 +916,16 @@ with tab4:
                         cols = st.columns([1, 1, 1, 1])
                         with cols[0]:
                             if row.get("source"):
-                                st.image(row["source"], caption=row.get("source_name", f"Image {row_idx+1}"), use_container_width=True)
+                                st.image(row["source"], caption=row.get("source_name", f"Image {row_idx+1}"), width="stretch")
                         with cols[1]:
                             if row.get("result_a"):
-                                st.image(row["result_a"], use_container_width=True)
+                                st.image(row["result_a"], width="stretch")
                         with cols[2]:
                             if row.get("result_b"):
-                                st.image(row["result_b"], use_container_width=True)
+                                st.image(row["result_b"], width="stretch")
                         with cols[3]:
                             if row.get("result_c"):
-                                st.image(row["result_c"], use_container_width=True)
+                                st.image(row["result_c"], width="stretch")
 
                     tc = entry.get('total_cost', {})
                     st.caption(f"Total: ${tc.get('gemini_pro', 0) + tc.get('gemini_flash', 0) + tc.get('flux', 0):.4f}")
@@ -941,14 +941,14 @@ with tab4:
                     with col1:
                         st.markdown(f"**Prompt A:** {entry['prompt_a']}")
                         if entry.get('result_a'):
-                            st.image(entry['result_a'], caption="Result A", use_container_width=True)
+                            st.image(entry['result_a'], caption="Result A", width="stretch")
                         if entry.get('cost_a'):
                             st.caption(f"Cost: ${entry['cost_a']['total_cost']:.4f}")
 
                     with col2:
                         st.markdown(f"**Prompt B:** {entry['prompt_b']}")
                         if entry.get('result_b'):
-                            st.image(entry['result_b'], caption="Result B", use_container_width=True)
+                            st.image(entry['result_b'], caption="Result B", width="stretch")
                         if entry.get('cost_b'):
                             st.caption(f"Cost: ${entry['cost_b']['total_cost']:.4f}")
 
@@ -956,7 +956,7 @@ with tab4:
                         with col3:
                             st.markdown(f"**Prompt C:** {entry['prompt_c']}")
                             if entry.get('result_c'):
-                                st.image(entry['result_c'], caption="Result C", use_container_width=True)
+                                st.image(entry['result_c'], caption="Result C", width="stretch")
                                 st.caption("Cost: ~$0.05")
 
         if st.button("🗑️ Clear History"):
