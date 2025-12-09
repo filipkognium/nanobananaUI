@@ -622,15 +622,121 @@ with tab4:
             else:
                 client = get_client()
 
+                # Helper function to convert PIL image to base64
+                def pil_to_base64_html(img):
+                    if img is None:
+                        return ""
+                    buf = io.BytesIO()
+                    img.save(buf, format="PNG")
+                    return base64.b64encode(buf.getvalue()).decode()
+
+                # Helper function to generate HTML report from current results
+                def generate_html_report(results, prompts, costs, num_gens, timestamp):
+                    prompt_a, prompt_b, prompt_c = prompts
+                    total_all = costs["gemini_pro"] + costs["flux"]
+
+                    html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Bulk Comparison Report - {timestamp}</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 40px; background: #f5f5f5; }}
+        .header {{ text-align: center; margin-bottom: 40px; }}
+        h1 {{ color: #333; }}
+        .summary {{ background: white; padding: 20px; border-radius: 10px; margin-bottom: 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
+        .image-section {{ background: white; padding: 30px; border-radius: 10px; margin-bottom: 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); page-break-inside: avoid; }}
+        .image-section h2 {{ color: #444; border-bottom: 2px solid #eee; padding-bottom: 10px; }}
+        .reference {{ text-align: center; margin-bottom: 20px; }}
+        .reference img {{ max-width: 300px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }}
+        .edits {{ display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; }}
+        .edit {{ flex: 1; min-width: 280px; max-width: 350px; background: #fafafa; padding: 15px; border-radius: 8px; }}
+        .edit h3 {{ margin: 0 0 10px 0; color: #666; font-size: 14px; }}
+        .edit img {{ width: 100%; border-radius: 6px; }}
+        .cost {{ background: #e8f5e9; padding: 15px; border-radius: 8px; margin-top: 20px; }}
+        .cost-table {{ width: 100%; border-collapse: collapse; }}
+        .cost-table th, .cost-table td {{ padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }}
+        .cost-table th {{ background: #f0f0f0; }}
+        @media print {{ .image-section {{ page-break-inside: avoid; }} }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🍌 Bulk Comparison Report (Incremental)</h1>
+        <p>Generated: {timestamp}</p>
+    </div>
+    <div class="summary">
+        <h2>📊 Summary</h2>
+        <p><strong>Reference Images Completed:</strong> {len(results)}</p>
+        <p><strong>Generations per Image:</strong> {num_gens} per prompt</p>
+        <p><strong>Total Generations:</strong> {len(results) * num_gens * 3}</p>
+        <p><strong>Models Used:</strong> Nano Banana Pro (Prompts A & B), Flux Kontext Pro (Prompt C)</p>
+        <div class="cost">
+            <table class="cost-table">
+                <tr><th>Model</th><th>Prompt</th><th>Cost</th></tr>
+                <tr><td>Nano Banana Pro (A)</td><td>{prompt_a[:100]}{'...' if len(prompt_a) > 100 else ''}</td><td>(included below)</td></tr>
+                <tr><td>Nano Banana Pro (B)</td><td>{prompt_b[:100]}{'...' if len(prompt_b) > 100 else ''}</td><td>(included below)</td></tr>
+                <tr><td>Nano Banana Pro Total</td><td></td><td>${costs['gemini_pro']:.4f}</td></tr>
+                <tr><td>Flux Kontext Pro</td><td>{prompt_c[:100]}{'...' if len(prompt_c) > 100 else ''}</td><td>${costs['flux']:.2f}</td></tr>
+                <tr><th>Total</th><th></th><th>${total_all:.4f}</th></tr>
+            </table>
+        </div>
+    </div>
+"""
+                    for idx, row in enumerate(results):
+                        source_b64 = pil_to_base64_html(row.get("source"))
+                        html += f"""
+    <div class="image-section">
+        <h2>Image {idx + 1}: {row.get('source_name', 'Unknown')}</h2>
+        <div class="reference">
+            <h3>Reference Image</h3>
+            <img src="data:image/png;base64,{source_b64}" alt="Reference">
+        </div>
+        <h3>Prompt A (Nano Banana Pro): "{prompt_a}"</h3>
+        <div class="edits">
+"""
+                        for gen_idx, img in enumerate(row.get("results_a", [])):
+                            img_b64 = pil_to_base64_html(img)
+                            cost = row["costs_a"][gen_idx]["total_cost"] if gen_idx < len(row.get("costs_a", [])) else 0
+                            html += f'<div class="edit"><h3>Gen {gen_idx + 1}</h3><img src="data:image/png;base64,{img_b64}" alt="A{gen_idx+1}"><p style="font-size:11px;color:#666;">Cost: ${cost:.4f}</p></div>'
+                        if not row.get("results_a"):
+                            html += '<p style="color:red;">No generations</p>'
+                        html += f'</div><h3>Prompt B (Nano Banana Pro): "{prompt_b}"</h3><div class="edits">'
+                        for gen_idx, img in enumerate(row.get("results_b", [])):
+                            img_b64 = pil_to_base64_html(img)
+                            cost = row["costs_b"][gen_idx]["total_cost"] if gen_idx < len(row.get("costs_b", [])) else 0
+                            html += f'<div class="edit"><h3>Gen {gen_idx + 1}</h3><img src="data:image/png;base64,{img_b64}" alt="B{gen_idx+1}"><p style="font-size:11px;color:#666;">Cost: ${cost:.4f}</p></div>'
+                        if not row.get("results_b"):
+                            html += '<p style="color:red;">No generations</p>'
+                        html += f'</div><h3>Prompt C (Flux Kontext Pro): "{prompt_c}"</h3><div class="edits">'
+                        for gen_idx, img in enumerate(row.get("results_c", [])):
+                            img_b64 = pil_to_base64_html(img)
+                            cost = row["costs_c"][gen_idx] if gen_idx < len(row.get("costs_c", [])) else 0
+                            html += f'<div class="edit"><h3>Gen {gen_idx + 1}</h3><img src="data:image/png;base64,{img_b64}" alt="C{gen_idx+1}"><p style="font-size:11px;color:#666;">Cost: ${cost:.4f}</p></div>'
+                        if not row.get("results_c"):
+                            html += '<p style="color:red;">No generations</p>'
+                        html += '</div></div>'
+                    html += '</body></html>'
+                    return html
+
                 # Progress tracking
                 progress_bar = st.progress(0)
                 status_text = st.empty()
 
+                # Placeholder for incremental report download
+                st.markdown("### 📄 Incremental Report (updates after each image)")
+                report_placeholder = st.empty()
+                report_counter = st.empty()
+
                 all_results = []
-                total_cost = {"gemini_pro": 0, "gemini_flash": 0, "flux": 0}
+                total_cost = {"gemini_pro": 0.0, "gemini_flash": 0.0, "flux": 0.0}
 
                 total_steps = len(compare_images) * num_generations * 3
                 current_step = 0
+
+                import datetime
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
                 for img_idx, img_file in enumerate(compare_images):
                     # Prepare image
@@ -722,6 +828,24 @@ with tab4:
                     all_results.append(result_row)
                     retry_status.empty()
 
+                    # Generate and display incremental report after each image
+                    html_report = generate_html_report(
+                        all_results,
+                        (prompt_a, prompt_b, prompt_c),
+                        total_cost,
+                        num_generations,
+                        timestamp
+                    )
+                    report_counter.success(f"✅ {len(all_results)}/{len(compare_images)} images complete - Report ready!")
+                    with report_placeholder.container():
+                        st.download_button(
+                            f"📄 Download Report ({len(all_results)} images)",
+                            html_report,
+                            f"comparison_report_{len(all_results)}of{len(compare_images)}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
+                            "text/html",
+                            key=f"incremental_report_{img_idx}"
+                        )
+
                 status_text.text("✅ All generations complete!")
                 progress_bar.progress(1.0)
 
@@ -798,160 +922,23 @@ with tab4:
                 | **Total** | **${total_all:.4f}** |
                 """)
 
-                # Generate Report
+                # Final Report (uses same function as incremental)
                 st.divider()
-                st.markdown("### 📄 Generate Report")
+                st.markdown("### 📄 Final Report")
 
-                import datetime
-                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-                # Build HTML report
-                def pil_to_base64_html(img):
-                    if img is None:
-                        return ""
-                    buf = io.BytesIO()
-                    img.save(buf, format="PNG")
-                    return base64.b64encode(buf.getvalue()).decode()
-
-                html_report = f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>Bulk Comparison Report - {timestamp}</title>
-    <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 40px; background: #f5f5f5; }}
-        .header {{ text-align: center; margin-bottom: 40px; }}
-        h1 {{ color: #333; }}
-        .summary {{ background: white; padding: 20px; border-radius: 10px; margin-bottom: 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
-        .image-section {{ background: white; padding: 30px; border-radius: 10px; margin-bottom: 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); page-break-inside: avoid; }}
-        .image-section h2 {{ color: #444; border-bottom: 2px solid #eee; padding-bottom: 10px; }}
-        .reference {{ text-align: center; margin-bottom: 20px; }}
-        .reference img {{ max-width: 300px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }}
-        .edits {{ display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; }}
-        .edit {{ flex: 1; min-width: 280px; max-width: 350px; background: #fafafa; padding: 15px; border-radius: 8px; }}
-        .edit h3 {{ margin: 0 0 10px 0; color: #666; font-size: 14px; }}
-        .edit .model {{ color: #007bff; font-weight: bold; font-size: 16px; margin-bottom: 5px; }}
-        .edit .prompt {{ color: #888; font-size: 12px; font-style: italic; margin-bottom: 10px; word-wrap: break-word; }}
-        .edit img {{ width: 100%; border-radius: 6px; }}
-        .cost {{ background: #e8f5e9; padding: 15px; border-radius: 8px; margin-top: 20px; }}
-        .cost-table {{ width: 100%; border-collapse: collapse; }}
-        .cost-table th, .cost-table td {{ padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }}
-        .cost-table th {{ background: #f0f0f0; }}
-        @media print {{ .image-section {{ page-break-inside: avoid; }} }}
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>🍌 Bulk Comparison Report</h1>
-        <p>Generated: {timestamp}</p>
-    </div>
-
-    <div class="summary">
-        <h2>📊 Summary</h2>
-        <p><strong>Reference Images:</strong> {len(all_results)}</p>
-        <p><strong>Generations per Image:</strong> {num_generations} per prompt</p>
-        <p><strong>Total Generations:</strong> {len(all_results) * num_generations * 3}</p>
-        <p><strong>Models Used:</strong> Nano Banana Pro (Prompts A & B), Flux Kontext Pro (Prompt C)</p>
-        <div class="cost">
-            <table class="cost-table">
-                <tr><th>Model</th><th>Prompt</th><th>Cost</th></tr>
-                <tr><td>Nano Banana Pro (A)</td><td>{prompt_a[:100]}{'...' if len(prompt_a) > 100 else ''}</td><td>(included below)</td></tr>
-                <tr><td>Nano Banana Pro (B)</td><td>{prompt_b[:100]}{'...' if len(prompt_b) > 100 else ''}</td><td>(included below)</td></tr>
-                <tr><td>Nano Banana Pro Total</td><td></td><td>${total_cost['gemini_pro']:.4f}</td></tr>
-                <tr><td>Flux Kontext Pro</td><td>{prompt_c[:100]}{'...' if len(prompt_c) > 100 else ''}</td><td>${total_cost['flux']:.2f}</td></tr>
-                <tr><th>Total</th><th></th><th>${total_all:.4f}</th></tr>
-            </table>
-        </div>
-    </div>
-"""
-
-                for idx, row in enumerate(all_results):
-                    source_b64 = pil_to_base64_html(row.get("source"))
-
-                    html_report += f"""
-    <div class="image-section">
-        <h2>Image {idx + 1}: {row.get('source_name', 'Unknown')}</h2>
-
-        <div class="reference">
-            <h3>Reference Image</h3>
-            <img src="data:image/png;base64,{source_b64}" alt="Reference">
-        </div>
-
-        <h3>Prompt A (Nano Banana Pro): "{prompt_a}"</h3>
-        <div class="edits">
-"""
-                    # Add all Prompt A generations
-                    for gen_idx, img in enumerate(row.get("results_a", [])):
-                        img_b64 = pil_to_base64_html(img)
-                        cost = row["costs_a"][gen_idx]["total_cost"] if gen_idx < len(row.get("costs_a", [])) else 0
-                        html_report += f"""
-            <div class="edit">
-                <h3>Gen {gen_idx + 1}</h3>
-                <img src="data:image/png;base64,{img_b64}" alt="Prompt A Gen {gen_idx + 1}">
-                <p style="font-size: 11px; color: #666;">Cost: ${cost:.4f}</p>
-            </div>
-"""
-                    if not row.get("results_a"):
-                        html_report += '<p style="color: red;">No generations</p>'
-
-                    html_report += f"""
-        </div>
-
-        <h3>Prompt B (Nano Banana Pro): "{prompt_b}"</h3>
-        <div class="edits">
-"""
-                    # Add all Prompt B generations
-                    for gen_idx, img in enumerate(row.get("results_b", [])):
-                        img_b64 = pil_to_base64_html(img)
-                        cost = row["costs_b"][gen_idx]["total_cost"] if gen_idx < len(row.get("costs_b", [])) else 0
-                        html_report += f"""
-            <div class="edit">
-                <h3>Gen {gen_idx + 1}</h3>
-                <img src="data:image/png;base64,{img_b64}" alt="Prompt B Gen {gen_idx + 1}">
-                <p style="font-size: 11px; color: #666;">Cost: ${cost:.4f}</p>
-            </div>
-"""
-                    if not row.get("results_b"):
-                        html_report += '<p style="color: red;">No generations</p>'
-
-                    html_report += f"""
-        </div>
-
-        <h3>Prompt C (Flux Kontext Pro): "{prompt_c}"</h3>
-        <div class="edits">
-"""
-                    # Add all Prompt C generations
-                    for gen_idx, img in enumerate(row.get("results_c", [])):
-                        img_b64 = pil_to_base64_html(img)
-                        cost = row["costs_c"][gen_idx] if gen_idx < len(row.get("costs_c", [])) else 0
-                        html_report += f"""
-            <div class="edit">
-                <h3>Gen {gen_idx + 1}</h3>
-                <img src="data:image/png;base64,{img_b64}" alt="Prompt C Gen {gen_idx + 1}">
-                <p style="font-size: 11px; color: #666;">Cost: ${cost:.4f}</p>
-            </div>
-"""
-                    if not row.get("results_c"):
-                        html_report += '<p style="color: red;">No generations</p>'
-
-                    html_report += """
-        </div>
-    </div>
-"""
-
-                html_report += """
-</body>
-</html>
-"""
-
-                # Download button for HTML report
+                final_report = generate_html_report(
+                    all_results,
+                    (prompt_a, prompt_b, prompt_c),
+                    total_cost,
+                    num_generations,
+                    timestamp
+                )
                 st.download_button(
-                    "📄 Download HTML Report",
-                    html_report,
-                    f"comparison_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
+                    "📄 Download Final HTML Report",
+                    final_report,
+                    f"comparison_report_FINAL_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
                     "text/html",
-                    key="download_report"
+                    key="download_final_report"
                 )
 
                 # Save to history
