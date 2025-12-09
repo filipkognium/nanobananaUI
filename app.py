@@ -186,7 +186,7 @@ def image_to_base64(image):
     image.save(buffered, format="PNG")
     return base64.b64encode(buffered.getvalue()).decode()
 
-def generate_flux_kontext(prompt, image_bytes, aspect_ratio="1:1"):
+def generate_flux_kontext(prompt, image_bytes, aspect_ratio="match_input_image"):
     """Generate image using Flux Kontext Pro from Replicate. Returns (output, cost)."""
     try:
         if not replicate_api_key:
@@ -201,32 +201,22 @@ def generate_flux_kontext(prompt, image_bytes, aspect_ratio="1:1"):
         img_base64 = base64.b64encode(image_bytes).decode('utf-8')
         data_uri = f"data:image/png;base64,{img_base64}"
 
-        # Create prediction to get metrics including cost
-        model = replicate.models.get("black-forest-labs/flux-kontext-pro")
-        version = model.latest_version
-
-        prediction = replicate.predictions.create(
-            version=version,
+        # Use replicate.run() for simpler, more reliable execution
+        # Model: black-forest-labs/flux-kontext-pro (official model)
+        output = replicate.run(
+            "black-forest-labs/flux-kontext-pro",
             input={
                 "prompt": prompt,
-                "image": data_uri,
+                "input_image": data_uri,
                 "aspect_ratio": aspect_ratio,
+                "output_format": "png",
             }
         )
 
-        # Wait for completion
-        prediction.wait()
+        # Flux Kontext Pro pricing: $0.04 per output image (fixed)
+        cost = 0.04
 
-        # Get cost from metrics if available
-        cost = 0.0
-        if prediction.metrics and 'predict_time' in prediction.metrics:
-            # Flux Kontext Pro costs ~$0.05 per image (based on ~5 seconds at $0.01/sec)
-            predict_time = prediction.metrics.get('predict_time', 5)
-            cost = predict_time * 0.01  # Approximate cost per second
-        else:
-            cost = 0.05  # Fallback estimate
-
-        return prediction.output, cost
+        return output, cost
     except Exception as e:
         st.error(f"Flux Kontext Pro Error: {str(e)}")
         return None, 0.0
